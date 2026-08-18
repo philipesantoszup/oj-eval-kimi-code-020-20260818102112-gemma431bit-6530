@@ -15,7 +15,7 @@ typedef struct free_block {
 static void *base_addr = NULL;
 static int total_pages = 0;
 static free_block_t *free_lists[MAX_RANK + 1];
-static int *ranks = NULL; // ranks[i] = r (allocated), ranks[i] = -r (free), ranks[i] = 0 (none)
+static int *ranks = NULL; // ranks[start_idx] = r (allocated), ranks[start_idx] = -r (free), others = 0
 static int free_counts[MAX_RANK + 1];
 
 static void add_free_block(int rank, int page_idx) {
