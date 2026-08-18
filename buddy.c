@@ -104,13 +104,32 @@ int return_pages(void *p) {
     int page_idx = ((char *)p - (char *)base_addr) / PAGE_SIZE;
     if (page_idx * PAGE_SIZE != ((char *)p - (char *)base_addr)) return -EINVAL;
     
-    if (page_to_rank[page_idx] == 0) return -EINVAL;
+    // Since we only store rank at the start, we need to find the start of the block.
+    // An allocated block starts at some start_idx and has some rank r.
+    // page_idx must be in [start_idx, start_idx + 2^(r-1)).
+    // This means start_idx = page_idx & ~(2^(r-1) - 1).
+    // But we don't know r. 
+    // Let's check from rank 1 to MAX_RANK.
+    int rank = 0;
+    for (int r = 1; r <= MAX_RANK; r++) {
+        int block_size = 1 << (r - 1);
+        int start_idx = page_idx & ~(block_size - 1);
+        if (start_idx < total_pages && page_to_rank[start_idx] == r) {
+            // Verify that page_idx is within this block
+            if (page_idx >= start_idx && page_idx < start_idx + block_size) {
+                rank = r;
+                break;
+            }
+        }
+    }
     
-    int rank = page_to_rank[page_idx];
-    page_to_rank[page_idx] = 0;
+    if (rank == 0) return -EINVAL;
+    
+    int block_start_idx = page_idx & ~((1 << (rank - 1)) - 1);
+    page_to_rank[block_start_idx] = 0;
     
     int current_rank = rank;
-    int current_idx = page_idx;
+    int current_idx = block_start_idx;
     
     while (current_rank < MAX_RANK) {
         int block_size = 1 << (current_rank - 1);
@@ -136,11 +155,6 @@ int query_ranks(void *p) {
     int page_idx = ((char *)p - (char *)base_addr) / PAGE_SIZE;
     if (page_idx * PAGE_SIZE != ((char *)p - (char *)base_addr)) return -EINVAL;
 
-    // Check if it's the start of an allocated block
-    if (page_to_rank[page_idx] > 0) {
-        return page_to_rank[page_idx];
-    }
-    
     // Check if it's inside an allocated block
     for (int r = MAX_RANK; r >= 1; r--) {
         int block_size = 1 << (r - 1);
@@ -150,7 +164,7 @@ int query_ranks(void *p) {
         }
     }
     
-    // Check if it's a free block
+    // Check if it's inside a free block
     for (int r = MAX_RANK; r >= 1; r--) {
         int block_size = 1 << (r - 1);
         int start_idx = page_idx & ~(block_size - 1);
