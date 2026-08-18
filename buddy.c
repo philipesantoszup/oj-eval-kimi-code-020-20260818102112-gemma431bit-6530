@@ -93,10 +93,7 @@ void *alloc_pages(int rank) {
         add_free_block(r, buddy_idx);
     }
 
-    int size = 1 << (target_rank - 1);
-    for (int i = page_idx; i < page_idx + size; i++) {
-        page_to_rank[i] = target_rank;
-    }
+    page_to_rank[page_idx] = target_rank;
     return (void *)block;
 }
 
@@ -110,10 +107,7 @@ int return_pages(void *p) {
     if (page_to_rank[page_idx] == 0) return -EINVAL;
     
     int rank = page_to_rank[page_idx];
-    int size = 1 << (rank - 1);
-    for (int i = page_idx; i < page_idx + size; i++) {
-        page_to_rank[i] = 0;
-    }
+    page_to_rank[page_idx] = 0;
     
     int current_rank = rank;
     int current_idx = page_idx;
@@ -142,10 +136,21 @@ int query_ranks(void *p) {
     int page_idx = ((char *)p - (char *)base_addr) / PAGE_SIZE;
     if (page_idx * PAGE_SIZE != ((char *)p - (char *)base_addr)) return -EINVAL;
 
+    // Check if it's the start of an allocated block
     if (page_to_rank[page_idx] > 0) {
         return page_to_rank[page_idx];
     }
     
+    // Check if it's inside an allocated block
+    for (int r = MAX_RANK; r >= 1; r--) {
+        int block_size = 1 << (r - 1);
+        int start_idx = page_idx & ~(block_size - 1);
+        if (start_idx < total_pages && page_to_rank[start_idx] == r) {
+            return r;
+        }
+    }
+    
+    // Check if it's a free block
     for (int r = MAX_RANK; r >= 1; r--) {
         int block_size = 1 << (r - 1);
         int start_idx = page_idx & ~(block_size - 1);
