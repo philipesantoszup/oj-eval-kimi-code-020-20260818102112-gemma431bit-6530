@@ -8,6 +8,7 @@
 
 typedef struct free_block {
     struct free_block *next;
+    struct free_block *prev;
 } free_block_t;
 
 static void *base_addr = NULL;
@@ -18,21 +19,26 @@ static int page_to_rank[32768];
 
 static void add_free_block(int rank, int page_idx) {
     free_block_t *block = (free_block_t *)((char *)base_addr + (size_t)page_idx * PAGE_SIZE);
+    block->prev = NULL;
     block->next = free_lists[rank];
+    if (free_lists[rank]) {
+        free_lists[rank]->prev = block;
+    }
     free_lists[rank] = block;
     is_free_rank[page_idx] = rank;
 }
 
 static void remove_free_block(int rank, int page_idx) {
-    free_block_t **curr = &free_lists[rank];
-    while (*curr) {
-        if ((char *)(*curr) == (char *)base_addr + (size_t)page_idx * PAGE_SIZE) {
-            *curr = (*curr)->next;
-            is_free_rank[page_idx] = 0;
-            return;
-        }
-        curr = &((*curr)->next);
+    free_block_t *block = (free_block_t *)((char *)base_addr + (size_t)page_idx * PAGE_SIZE);
+    if (block->prev) {
+        block->prev->next = block->next;
+    } else {
+        free_lists[rank] = block->next;
     }
+    if (block->next) {
+        block->next->prev = block->prev;
+    }
+    is_free_rank[page_idx] = 0;
 }
 
 int init_page(void *p, int pgcount) {
@@ -77,7 +83,10 @@ void *alloc_pages(int rank) {
         add_free_block(r, buddy_idx);
     }
 
-    page_to_rank[page_idx] = target_rank;
+    int size = 1 << (target_rank - 1);
+    for (int i = page_idx; i < page_idx + size; i++) {
+        page_to_rank[i] = target_rank;
+    }
     return (void *)block;
 }
 
@@ -91,7 +100,10 @@ int return_pages(void *p) {
     if (page_to_rank[page_idx] == 0) return -EINVAL;
     
     int rank = page_to_rank[page_idx];
-    page_to_rank[page_idx] = 0;
+    int size = 1 << (rank - 1);
+    for (int i = page_idx; i < page_idx + size; i++) {
+        page_to_rank[i] = 0;
+    }
     
     int current_rank = rank;
     int current_idx = page_idx;
@@ -120,14 +132,8 @@ int query_ranks(void *p) {
     int page_idx = ((char *)p - (char *)base_addr) / PAGE_SIZE;
     if (page_idx * PAGE_SIZE != ((char *)p - (char *)base_addr)) return -EINVAL;
 
-    for (int i = 0; i < total_pages; i++) {
-        if (page_to_rank[i] > 0) {
-            int r = page_to_rank[i];
-            int size = 1 << (r - 1);
-            if (page_idx >= i && page_idx < i + size) {
-                return r;
-            }
-        }
+    if (page_to_rank[page_idx] > 0) {
+        return page_to_rank[page_idx];
     }
     
     for (int r = MAX_RANK; r >= 1; r--) {
