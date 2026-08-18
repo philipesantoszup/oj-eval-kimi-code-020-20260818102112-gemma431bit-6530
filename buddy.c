@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #define PAGE_SIZE 4096
 #define MAX_RANK 16
@@ -14,8 +15,9 @@ typedef struct free_block {
 static void *base_addr = NULL;
 static int total_pages = 0;
 static free_block_t *free_lists[MAX_RANK + 1];
-static int is_free_rank[32768];
-static int page_to_rank[32768];
+static int *is_free_rank = NULL;
+static int *page_to_rank = NULL;
+static int free_counts[MAX_RANK + 1];
 
 static void add_free_block(int rank, int page_idx) {
     free_block_t *block = (free_block_t *)((char *)base_addr + (size_t)page_idx * PAGE_SIZE);
@@ -26,6 +28,7 @@ static void add_free_block(int rank, int page_idx) {
     }
     free_lists[rank] = block;
     is_free_rank[page_idx] = rank;
+    free_counts[rank]++;
 }
 
 static void remove_free_block(int rank, int page_idx) {
@@ -39,14 +42,21 @@ static void remove_free_block(int rank, int page_idx) {
         block->next->prev = block->prev;
     }
     is_free_rank[page_idx] = 0;
+    free_counts[rank]--;
 }
 
 int init_page(void *p, int pgcount) {
     base_addr = p;
     total_pages = pgcount;
+    
+    if (is_free_rank) free(is_free_rank);
+    if (page_to_rank) free(page_to_rank);
+    
+    is_free_rank = (int *)calloc(pgcount, sizeof(int));
+    page_to_rank = (int *)calloc(pgcount, sizeof(int));
+    
     memset(free_lists, 0, sizeof(free_lists));
-    memset(is_free_rank, 0, sizeof(is_free_rank));
-    memset(page_to_rank, 0, sizeof(page_to_rank));
+    memset(free_counts, 0, sizeof(free_counts));
 
     int current_offset = 0;
     int remaining_pages = pgcount;
@@ -149,12 +159,5 @@ int query_ranks(void *p) {
 
 int query_page_counts(int rank) {
     if (rank < 1 || rank > MAX_RANK) return -EINVAL;
-    
-    int count = 0;
-    free_block_t *curr = free_lists[rank];
-    while (curr) {
-        count++;
-        curr = curr->next;
-    }
-    return count;
+    return free_counts[rank];
 }
